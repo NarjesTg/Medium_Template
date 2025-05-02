@@ -6,7 +6,7 @@ env:
     #SITE_NAME: "Testingthesshkey"
     #TARGET_IP: "52.204.107.146"
     SSH_USER: "ec2-user"  # Changez en "ubuntu" si AMI Ubuntu
-    SITE_SECRET_NAME : "sites/19/Testingthesshkey"
+    #SITE_SECRET_NAME : "sites/19/Testingthesshkey"
     DOCKER_IMAGE : "jesstg/drupal-test:latest"
 
    

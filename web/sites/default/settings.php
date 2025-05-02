@@ -813,3 +813,20 @@ $settings['migrate_node_migrate_type_classic'] = FALSE;
 # if (file_exists($app_root . '/' . $site_path . '/settings.local.php')) {
 #   include $app_root . '/' . $site_path . '/settings.local.php';
 # }
+
+// Configuration dynamique de la base de données via variables d'environnement
+$databases['default']['default'] = [
+  'database' => getenv('DB_NAME') ?: 'drupal',
+  'username' => getenv('DB_USER') ?: 'drupal',
+  'password' => getenv('DB_PASSWORD') ?: 'drupal',
+  'host' => getenv('DB_HOST') ?: 'db',
+  'port' => '3306',
+  'driver' => 'mysql',
+  'prefix' => '',
+  'collation' => 'utf8mb4_general_ci',
+];
+
+// Hash salt pour la sécurité
+$settings['hash_salt'] = 'J1JuQIfyUZ9tPeC6f75tWrVE3/KIqRJiVk12BLaEFQc=';
+// Configuration sync directory
+$settings['config_sync_directory'] = '/var/www/html/config/sync';

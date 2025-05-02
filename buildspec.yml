@@ -3,11 +3,16 @@ version: 0.2
 env:
   variables:
     #USER_ID: "19"
-    #SITE_NAME: "Testingthesshkey"
-    #TARGET_IP: "52.204.107.146"
+    SITE_NAME: "Testinglastonemoretime"
+    TARGET_IP: "52.21.50.243"
     SSH_USER: "ec2-user"  # Changez en "ubuntu" si AMI Ubuntu
-    #SITE_SECRET_NAME : "sites/19/Testingthesshkey"
+    SITE_SECRET_NAME : "sites/19/Testinglastonemoretime"
     DOCKER_IMAGE : "jesstg/drupal-test:latest"
+    DB_NAME : "db19Testinglastonemoretime"
+    DB_HOST=: "ls-69fe942e9ee0570ad958148ce1f1fbf37e749a2f.c43wcgu6gelw.us-east-1.rds.amazonaws.com"
+    DB_PORT : "3306"
+    DB_USER : "user"
+    DB_PASSWORD: 'xnV&waZdU-1H#_sC'
 
    
     

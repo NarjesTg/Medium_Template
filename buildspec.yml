@@ -1,9 +1,8 @@
-#pipeline succeded
 version: 0.2
 
 env:
   variables:
-    SSH_USER: "ec2-user"  # Changez en "ubuntu" si AMI Ubuntu
+    SSH_USER: "ec2-user" 
 
 phases:
   install:

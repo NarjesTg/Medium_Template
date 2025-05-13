@@ -7,7 +7,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN a2enmod rewrite
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+#COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+COPY  --from=public.ecr.aws/composer/composer:latest /usr/bin/composer /usr/bin/composer
+
 
 WORKDIR /var/www/html
 

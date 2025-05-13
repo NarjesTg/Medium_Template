@@ -1,0 +1,279 @@
+version: 0.2
+
+env:
+  variables:
+    SSH_USER: "ec2-user"  
+  
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - echo "📦 Installation des outils AWS CLI"
+      - pip install --upgrade awscli
+
+  pre_build:
+    commands:
+      - echo "🔑 Logging in to Amazon ECR"
+      - echo "Retrieving app credentials from Secrets Manager"
+      - echo "📦 Setting ECR base URL"
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_BASE_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+      - echo "📦 Logging in to ECR at $ECR_BASE_URL"
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_BASE_URL
+
+
+
+
+       # Configuration du site
+      - |
+        if ! aws secretsmanager get-secret-value \
+          --secret-id $SITE_SECRET_NAME \
+          --region $AWS_REGION \
+          --query SecretString \
+          --output text > site-config.json; then
+            echo "❌ ERREUR: Secret $SITE_SECRET_NAME introuvable!"
+            aws secretsmanager list-secrets --region $AWS_REGION \
+              --query "SecretList[?contains(Name, 'sites/$USER_ID')].{Name:Name,CreatedDate:CreatedDate}"
+            exit 1
+        fi
+        
+        jq -e 'has("db_endpoint") and has("db_username")' site-config.json >/dev/null || {
+          echo "❌ Champs manquants dans le secret!"
+          jq . site-config.json
+          exit 1
+        }
+        
+      - echo "🔍 Récupération de la clé SSH"
+      - echo "📥 Lecture du secret depuis Secrets Manager"
+      - |
+        aws secretsmanager get-secret-value \
+          --secret-id "$SECRET_PATH" \
+          --region $AWS_REGION \
+          --query SecretString \
+          --output text > ~/.ssh/deploy_key.pem || {
+            echo "❌ Secret introuvable : $SECRET_PATH";
+            exit 1;
+          }
+
+
+      - echo "🔐 Sécurisation du fichier clé"
+      - chmod 600 ~/.ssh/deploy_key.pem
+      - mkdir -p ~/.ssh
+      - chmod 700 ~/.ssh
+      - echo "📄 Vérification du format de la clé"
+      - grep -q "BEGIN.*PRIVATE KEY" ~/.ssh/deploy_key.pem || {
+          echo "❌ Clé SSH invalide";
+          cat ~/.ssh/deploy_key.pem;
+          exit 1;
+        }
+      - echo "🔍 Validation de la clé privée"
+      - ssh-keygen -y -P "" -f ~/.ssh/deploy_key.pem > /tmp/public_key.pub || {
+          echo "❌ Clé SSH corrompue ou invalide";
+          cat ~/.ssh/deploy_key.pem;
+          exit 1;
+        }
+      - echo "🔑 Ajout de l'hôte à known_hosts"
+      - ssh-keyscan -H "$TARGET_IP" >> ~/.ssh/known_hosts 2>/dev/null
+
+
+  build:
+    commands:
+      - export REPO_NAME="${SITE_NAME}/drupal"
+      - export IMAGE_TAG="latest"
+      - export IMAGE_URI="$ECR_BASE_URL/$REPO_NAME"
+
+      - echo "Building Docker image with tag"
+      - docker build -t "$REPO_NAME:$IMAGE_TAG" .
+      - echo "✅ Logged in to ECR $ECR_BASE_URL"
+      - docker tag "$REPO_NAME:$IMAGE_TAG" "$IMAGE_URI"
+      - docker push "$IMAGE_URI"
+      #- docker pull "jesstg/drupal-app-test:latest"
+      #- docker tag "jesstg/drupal-app-test:latest" "$IMAGE_URI"
+      #- docker push "$IMAGE_URI"
+      
+      # Extract variables from secret
+      - echo "✅ Loading variables from site-config.json"
+      - export DB_NAME=$(jq -r '.db_name // ""' site-config.json)
+      - export DB_HOST=$(jq -r '.db_endpoint // ""' site-config.json)
+      - export DB_USER=$(jq -r '.db_username // ""' site-config.json)
+      - export DB_PASSWORD=$(jq -r '.db_password // ""' site-config.json)
+      - export INSTANCE_IP=$(jq -r '.public_ip // ""' site-config.json)
+      - export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+  
+
+      # Debug extracted variables
+      - echo "🔍 Debug extracted variables:"
+      - echo "DB_NAME=$DB_NAME"
+      - echo "DB_HOST=$DB_HOST"
+      - echo "DB_USER=$DB_USER"
+      - echo "DB_PASSWORD=$DB_PASSWORD"
+      - echo "INSTANCE_IP=$INSTANCE_IP"
+
+      # Validate extracted variables
+      - |
+        if [ -z "$DB_NAME" ] || [ -z "$DB_HOST" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ] || [ -z "$INSTANCE_IP" ]; then
+          echo "❌ One or more required variables are empty!"
+          echo "DB_NAME=$DB_NAME"
+          echo "DB_HOST=$DB_HOST"
+          echo "DB_USER=$DB_USER"
+          echo "DB_PASSWORD=$DB_PASSWORD"
+          echo "INSTANCE_IP=$INSTANCE_IP"
+          echo "🔍 Raw secret content:"
+          cat site-config.json
+          jq . site-config.json
+          exit 1
+        fi
+
+      # Debug output
+      - echo "🔍 Debug output (local):"
+      - echo "DB_NAME=$DB_NAME"
+      - echo "DB_HOST=$DB_HOST"
+      - echo "DB_PORT=$DB_PORT"
+      - echo "DB_USER=$DB_USER"
+      - echo "INSTANCE_IP=$INSTANCE_IP"
+      - echo "DB_PASSWORD=$DB_PASSWORD"
+
+      # SSH to target instance
+      - echo "🚀 Connecting to $INSTANCE_IP via SSH"
+      - |
+        ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key.pem $SSH_USER@$INSTANCE_IP << EOSSH
+          set -eo pipefail
+
+          # Export variables with explicit values
+          export DB_HOST='$DB_HOST'
+          export DB_PORT='$DB_PORT'
+          export DB_NAME='$DB_NAME'
+          export DB_USER='$DB_USER'
+          export DB_PASSWORD='$DB_PASSWORD'
+          #export DOCKER_IMAGE='$DOCKER_IMAGE'
+          export AWS_REGION='$AWS_REGION'
+          export REPO_NAME="${SITE_NAME}/drupal"
+          export IMAGE_TAG="latest"
+          export IMAGE_URI="$ECR_BASE_URL/$REPO_NAME:$IMAGE_TAG"
+          export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          # Debug variables in SSH session
+          echo "🔍 Validation des variables reçues :"
+          echo "DB_NAME=\$DB_NAME"
+          echo "DB_HOST=\$DB_HOST"
+          echo "DB_PORT=\$DB_PORT"
+          echo "DB_USER=\$DB_USER"
+          echo "DB_PASSWORD=\$DB_PASSWORD"
+
+          # Validate variables
+          if [ -z "\$DB_NAME" ] || [ -z "\$DB_HOST" ] || [ -z "\$DB_USER" ] || [ -z "\$DB_PASSWORD" ]; then
+            echo "❌ One or more variables are empty in SSH session!"
+            exit 1
+          fi
+
+          # Install dependencies
+          echo "🔧 Updating packages and installing dependencies"
+          sudo yum update -y
+          sudo yum install -y nc mysql docker
+          sudo systemctl start docker
+          sudo systemctl enable docker
+
+          # Test database connection
+          echo "🔍 Testing database connection"
+          mysql -h "\$DB_HOST" -P "\$DB_PORT" -u "\$DB_USER" -p"\$DB_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \$DB_NAME;" || {
+            echo "❌ Failed to connect to database or create \$DB_NAME"
+            exit 1
+          }
+
+          echo "🔧 Mounting disk if not already..."
+            if ! mountpoint -q /mnt/drupal-data; then
+              sudo mkfs.ext4 /dev/nvme1n1 || echo "Already formatted"
+              sudo mkdir -p /mnt/drupal-data/config /mnt/drupal-data/files
+              sudo mount /dev/nvme1n1 /mnt/drupal-data
+              echo "/dev/nvme1n1 /mnt/drupal-data ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
+            fi
+
+          echo "📁 Preparing folders and permissions..."
+          sudo mkdir -p /mnt/drupal-data/modules
+          sudo mkdir -p /mnt/drupal-data/themes
+          sudo mkdir -p /mnt/drupal-data/files/inline-images
+          sudo mkdir -p /mnt/drupal-data/config/sync
+          sudo chown -R 33:33 /mnt/drupal-data
+          sudo chmod -R 775 /mnt/drupal-data
+
+          # Stop and remove existing container
+          echo "🧹 Stopping previous container if exists"
+          docker stop drupal || true
+          docker rm drupal || true
+
+          docker login -u AWS -p $(aws ecr get-login-password --region us-east-2) $ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com
+
+          # Pull Docker image
+          echo "🐳 Pulling Docker image: \$IMAGE_URI"
+          docker pull "$IMAGE_URI" || {
+            echo "❌ Failed to pull Docker image"
+            exit 1
+          }
+
+          # Run Docker container
+          echo "🐳 Starting container"
+          docker run -d \
+            --name drupal \
+            -p 80:80 \
+            --restart unless-stopped \
+            -v /mnt/drupal-data/modules:/var/www/html/web/modules/custom \
+            -v /mnt/drupal-data/themes:/var/www/html/web/themes/custom \
+            -v /mnt/drupal-data/files:/var/www/html/web/sites/default/files \
+            -v /mnt/drupal-data/config:/var/www/html/web/config \
+            -e DB_HOST="\$DB_HOST" \
+            -e DB_PORT="\$DB_PORT" \
+            -e DB_NAME="\$DB_NAME" \
+            -e DB_USER="\$DB_USER" \
+            -e DB_PASSWORD="\$DB_PASSWORD" \
+            -e AWS_REGION="\$AWS_REGION" \
+            "\$IMAGE_URI" || {
+              echo "❌ Failed to start Docker container"
+              docker logs drupal
+              exit 1
+            }
+
+          # Wait for container to be healthy
+          echo "🔍 Waiting for container to be ready"
+          for i in {1..30}; do
+            if docker ps -q --filter "name=drupal" --filter "status=running" >/dev/null; then
+              echo "✅ Container is running"
+              break
+            fi
+            echo "⏳ Waiting for container (\$i/30)"
+            sleep 60
+          done
+
+          # Verify container status
+          if ! docker ps -q --filter "name=drupal" --filter "status=running" >/dev/null; then
+            echo "❌ Container failed to start"
+            docker logs drupal
+            exit 1
+          fi
+
+          # Configure permissions inside container
+          echo "🔧 Configuring permissions in container"
+          docker exec drupal mkdir -p /var/www/html/web/config/sync
+          docker exec drupal chown -R www-data:www-data /var/www/html/web/config
+          docker exec drupal chmod -R 775 /var/www/html/web/config
+          docker exec drupal chown -R www-data:www-data /var/www/html/web/sites/default/files
+          docker exec drupal chmod -R 775 /var/www/html/web/sites/default/files
+
+          
+
+          # Configure Drupal settings
+          echo "🔧 Configuring Drupal settings"
+          docker exec drupal vendor/bin/drush --root=/var/www/html/web config-set filter.format.basic_html editor.image_upload.status 1 -y
+          docker exec drupal vendor/bin/drush --root=/var/www/html/web config-set filter.format.basic_html editor.image_upload.directory inline-images -y
+          docker exec drupal vendor/bin/drush --root=/var/www/html/web config-set filter.format.basic_html editor.image_upload.max_size 2097152 -y
+          docker exec drupal vendor/bin/drush --root=/var/www/html/web config-set filter.format.basic_html editor.image_upload.extensions "jpg,png,gif" -y
+          docker exec drupal vendor/bin/drush --root=/var/www/html/web config-set field.storage.node.field_image file_directory inline-images -y
+          docker exec drupal vendor/bin/drush --root=/var/www/html/web cr
+
+          echo "✅ Deployment completed"
+        EOSSH
+
+artifacts:
+  files:
+    - "**/*"

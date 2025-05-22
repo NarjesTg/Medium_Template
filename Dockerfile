@@ -1,4 +1,5 @@
-FROM php:8.2-apache
+#FROM php:8.2-apache
+FROM public.ecr.aws/docker/library/php:8.2-apache
 
 RUN apt-get update && apt-get install -y \
     git zip unzip libpng-dev libjpeg-dev libzip-dev \

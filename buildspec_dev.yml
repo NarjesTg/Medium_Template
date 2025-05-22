@@ -203,7 +203,7 @@ phases:
           docker stop drupal || true
           docker rm drupal || true
 
-          docker login -u AWS -p $(aws ecr get-login-password --region us-east-2) $ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com
+          docker login -u AWS -p $(aws ecr get-login-password --region $AWS_REGION) $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
 
           # Pull Docker image
           echo "🐳 Pulling Docker image: \$IMAGE_URI"

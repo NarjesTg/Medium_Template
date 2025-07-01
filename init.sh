@@ -48,7 +48,7 @@ if ! grep -q "getenv('DB_HOST')" web/sites/default/settings.php; then
 ];
 
 // Hash salt pour la sécurité
-\$settings['hash_salt'] = '$HASH_SALT';
+//\$settings['hash_salt'] = '$HASH_SALT';
 // Configuration sync directory
 \$settings['config_sync_directory'] = '/var/www/html/config/sync';
 EOL

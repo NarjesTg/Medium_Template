@@ -43,7 +43,7 @@ phases:
       - export DB_USERNAME=$(jq -r '.db_username // ""' site-config.json)
       - export DB_PASSWORD=$(jq -r '.db_password // ""' site-config.json)
       - export ALB_DNS=$(jq -r '.alb_dns_name // ""' site-config.json)
-      - export DB_NAME="db19abcccfds"  # Hardcoded as per task definition
+      - export DB_NAME=$(jq -r '.db_name // ""' site-config.json)
       - export DB_PORT="3306"          # Hardcoded as per task definition
       - export REPO_NAME="${SITE_NAME}/drupal"
       - export IMAGE_TAG="latest"
